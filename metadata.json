@@ -1,0 +1,6 @@
+{
+  "name": "Kasir Retail",
+  "description": "Aplikasi kasir retail lengkap dengan katalog stok, scan QR, pencatatan transaksi, cetak struk, laporan laba rugi, dan pengelolaan modal pengeluaran.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
