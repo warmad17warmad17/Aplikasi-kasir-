@@ -50,6 +50,15 @@ interface ProductDao {
 
     @Query("SELECT COUNT(*) FROM products")
     suspend fun countProducts(): Int
+
+    @Query("SELECT DISTINCT category FROM products WHERE category IS NOT NULL AND category != ''")
+    suspend fun getDistinctCategories(): List<String>
+
+    @Query("SELECT * FROM products ORDER BY id ASC")
+    suspend fun getAllProductsSync(): List<ProductEntity>
+
+    @Query("DELETE FROM products")
+    suspend fun deleteAllProducts()
 }
 
 @Dao
@@ -63,8 +72,14 @@ interface TransactionDao {
     @Query("SELECT * FROM transactions WHERE id = :id LIMIT 1")
     suspend fun getTransactionById(id: Long): TransactionEntity?
 
+    @Query("SELECT * FROM transactions ORDER BY id ASC")
+    suspend fun getAllTransactionsSync(): List<TransactionEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertTransaction(transaction: TransactionEntity): Long
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertTransactions(transactions: List<TransactionEntity>)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertItems(items: List<TransactionItemEntity>)
@@ -78,8 +93,17 @@ interface TransactionDao {
     @Query("SELECT * FROM transaction_items ORDER BY id DESC")
     fun getAllTransactionItems(): Flow<List<TransactionItemEntity>>
 
+    @Query("SELECT * FROM transaction_items ORDER BY id ASC")
+    suspend fun getAllTransactionItemsSync(): List<TransactionItemEntity>
+
     @Query("DELETE FROM transactions WHERE id = :id")
     suspend fun deleteTransaction(id: Long)
+
+    @Query("DELETE FROM transactions")
+    suspend fun deleteAllTransactions()
+
+    @Query("DELETE FROM transaction_items")
+    suspend fun deleteAllTransactionItems()
 }
 
 @Dao
@@ -90,14 +114,23 @@ interface ExpenseDao {
     @Query("SELECT * FROM expenses WHERE date >= :startTime AND date <= :endTime ORDER BY date DESC")
     fun getExpensesBetween(startTime: Long, endTime: Long): Flow<List<ExpenseEntity>>
 
+    @Query("SELECT * FROM expenses ORDER BY id ASC")
+    suspend fun getAllExpensesSync(): List<ExpenseEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(expense: ExpenseEntity): Long
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(expenses: List<ExpenseEntity>)
 
     @Update
     suspend fun update(expense: ExpenseEntity)
 
     @Delete
     suspend fun delete(expense: ExpenseEntity)
+
+    @Query("DELETE FROM expenses")
+    suspend fun deleteAllExpenses()
 }
 
 @Dao
@@ -111,3 +144,37 @@ interface StoreInfoDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertOrUpdate(storeInfo: StoreInfoEntity)
 }
+
+@Dao
+interface CatalogDao {
+    @Query("SELECT * FROM catalogs ORDER BY name ASC")
+    fun getAllCatalogs(): Flow<List<com.example.data.entity.CatalogEntity>>
+
+    @Query("SELECT * FROM catalogs ORDER BY id ASC")
+    suspend fun getAllCatalogsSync(): List<com.example.data.entity.CatalogEntity>
+
+    @Query("SELECT * FROM catalogs WHERE LOWER(name) = LOWER(:name) LIMIT 1")
+    suspend fun getCatalogByName(name: String): com.example.data.entity.CatalogEntity?
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insert(catalog: com.example.data.entity.CatalogEntity): Long
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(catalogs: List<com.example.data.entity.CatalogEntity>)
+
+    @Delete
+    suspend fun delete(catalog: com.example.data.entity.CatalogEntity)
+
+    @Query("DELETE FROM catalogs WHERE id = :id")
+    suspend fun deleteById(id: Long)
+
+    @Query("DELETE FROM catalogs")
+    suspend fun deleteAllCatalogs()
+
+    @Query("SELECT COUNT(*) FROM products WHERE LOWER(category) = LOWER(:catalogName)")
+    suspend fun countProductsInCatalog(catalogName: String): Int
+
+    @Query("SELECT COUNT(*) FROM catalogs")
+    suspend fun countCatalogs(): Int
+}
+

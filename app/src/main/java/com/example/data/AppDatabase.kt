@@ -4,11 +4,14 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
+import com.example.data.dao.CatalogDao
 import com.example.data.dao.ExpenseDao
 import com.example.data.dao.ProductDao
 import com.example.data.dao.StoreInfoDao
 import com.example.data.dao.TransactionDao
+import com.example.data.entity.CatalogEntity
 import com.example.data.entity.ExpenseEntity
 import com.example.data.entity.ProductEntity
 import com.example.data.entity.StoreInfoEntity
@@ -24,9 +27,10 @@ import kotlinx.coroutines.launch
         TransactionEntity::class,
         TransactionItemEntity::class,
         ExpenseEntity::class,
-        StoreInfoEntity::class
+        StoreInfoEntity::class,
+        CatalogEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -34,10 +38,23 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun transactionDao(): TransactionDao
     abstract fun expenseDao(): ExpenseDao
     abstract fun storeInfoDao(): StoreInfoDao
+    abstract fun catalogDao(): CatalogDao
 
     companion object {
         @Volatile
         private var INSTANCE: AppDatabase? = null
+
+        val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `catalogs` (" +
+                            "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                            "`name` TEXT NOT NULL, " +
+                            "`createdAt` INTEGER NOT NULL)"
+                )
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_catalogs_name` ON `catalogs` (`name`)")
+            }
+        }
 
         fun getDatabase(context: Context, scope: CoroutineScope): AppDatabase {
             return INSTANCE ?: synchronized(this) {
@@ -46,6 +63,8 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "retail_pos_database"
                 )
+                    .addMigrations(MIGRATION_1_2)
+                    .fallbackToDestructiveMigration()
                     .addCallback(DatabaseCallback(scope))
                     .build()
                 INSTANCE = instance
@@ -83,6 +102,19 @@ abstract class AppDatabase : RoomDatabase() {
                             )
                         )
                     }
+
+                    // Seed default and existing categories into catalogs
+                    val catalogDao = database.catalogDao()
+                    val defaultCatalogs = listOf("Sembako", "Minuman", "Makanan", "Bumbu Dapur", "Kebutuhan Rumah", "Snack", "Lainnya")
+                    defaultCatalogs.forEach { cat ->
+                        catalogDao.insert(CatalogEntity(name = cat))
+                    }
+                    val existingCats = database.productDao().getDistinctCategories()
+                    existingCats.forEach { cat ->
+                        if (cat.isNotBlank()) {
+                            catalogDao.insert(CatalogEntity(name = cat.trim()))
+                        }
+                    }
                 }
             }
         }
@@ -92,6 +124,13 @@ abstract class AppDatabase : RoomDatabase() {
             val storeInfoDao = database.storeInfoDao()
             val expenseDao = database.expenseDao()
             val transactionDao = database.transactionDao()
+            val catalogDao = database.catalogDao()
+
+            // Seed default catalogs
+            val defaultCatalogs = listOf("Sembako", "Minuman", "Makanan", "Bumbu Dapur", "Kebutuhan Rumah", "Snack", "Lainnya")
+            defaultCatalogs.forEach { cat ->
+                catalogDao.insert(CatalogEntity(name = cat))
+            }
 
             // 1. Initial Store Info & Capital
             storeInfoDao.insertOrUpdate(

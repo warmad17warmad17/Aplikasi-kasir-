@@ -74,3 +74,14 @@ data class StoreInfoEntity(
     val initialCapital: Double = 2500000.0,
     val receiptFooter: String = "Terima kasih telah berbelanja di Toko Makmur!"
 )
+
+@Entity(
+    tableName = "catalogs",
+    indices = [Index(value = ["name"], unique = true)]
+)
+data class CatalogEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val name: String,
+    val createdAt: Long = System.currentTimeMillis()
+)
+

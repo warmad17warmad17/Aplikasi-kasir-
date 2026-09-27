@@ -21,11 +21,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Inventory
 import androidx.compose.material.icons.filled.QrCode
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
@@ -43,6 +46,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -55,13 +59,16 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.entity.ProductEntity
 import com.example.ui.PosViewModel
 import com.example.ui.components.BarcodeVisual
+import com.example.ui.dialogs.CatalogManagementDialog
 import com.example.ui.dialogs.EditProductDialog
+import com.example.ui.dialogs.QuickCreateCatalogDialog
 import com.example.util.Formatters
 
 @Composable
@@ -73,11 +80,17 @@ fun ProductCatalogScreen(viewModel: PosViewModel) {
     val selectedCategory by viewModel.selectedCategory.collectAsStateWithLifecycle()
     val filterLowStockOnly by viewModel.filterLowStockOnly.collectAsStateWithLifecycle()
 
+    val allCatalogNames by viewModel.allCatalogNames.collectAsStateWithLifecycle()
+    val productCounts by viewModel.catalogProductCounts.collectAsStateWithLifecycle()
+
     var productToEdit by remember { mutableStateOf<ProductEntity?>(null) }
     var showAddDialog by remember { mutableStateOf(false) }
+    var showCatalogManagerDialog by remember { mutableStateOf(false) }
+    var showQuickCreateCatalogDialog by remember { mutableStateOf(false) }
+    var emptyCatalogToDelete by remember { mutableStateOf<String?>(null) }
 
-    val categories = remember(allProducts) {
-        listOf("Semua") + allProducts.map { it.category }.distinct()
+    val displayCategories = remember(allCatalogNames) {
+        listOf("Semua") + allCatalogNames
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -124,19 +137,69 @@ fun ProductCatalogScreen(viewModel: PosViewModel) {
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // Category selection chips
+                        // Category selection chips with Catalog manager and Add buttons
                         LazyRow(
                             modifier = Modifier.weight(1f),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            items(categories) { cat ->
+                            // "Kelola Katalog" button
+                            item {
                                 FilterChip(
-                                    selected = selectedCategory == cat,
-                                    onClick = { viewModel.selectCategory(cat) },
-                                    label = { Text(cat, fontSize = 12.sp) },
+                                    selected = false,
+                                    onClick = { showCatalogManagerDialog = true },
+                                    leadingIcon = {
+                                        Icon(
+                                            Icons.Default.FolderOpen,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(16.dp),
+                                            tint = MaterialTheme.colorScheme.primary
+                                        )
+                                    },
+                                    label = { Text("Kelola", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
                                     colors = FilterChipDefaults.filterChipColors(
-                                        selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                                        selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                        containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+                                        labelColor = MaterialTheme.colorScheme.primary
+                                    ),
+                                    modifier = Modifier.testTag("btn_open_catalog_manager")
+                                )
+                            }
+
+                            // "+ Buat Katalog" quick button
+                            item {
+                                FilterChip(
+                                    selected = false,
+                                    onClick = { showQuickCreateCatalogDialog = true },
+                                    leadingIcon = {
+                                        Icon(
+                                            Icons.Default.Add,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    },
+                                    label = { Text("Katalog Baru", fontSize = 11.sp) },
+                                    modifier = Modifier.testTag("btn_quick_add_catalog")
+                                )
+                            }
+
+                            items(displayCategories) { cat ->
+                                val count = if (cat == "Semua") allProducts.size else (productCounts[cat] ?: 0)
+                                val isEmpty = cat != "Semua" && count == 0
+                                val isSelected = selectedCategory == cat
+
+                                FilterChip(
+                                    selected = isSelected,
+                                    onClick = { viewModel.selectCategory(cat) },
+                                    label = {
+                                        Text(
+                                            text = "$cat ($count)",
+                                            fontSize = 11.sp,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                        )
+                                    },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = if (isEmpty) Color(0xFFF57C00) else MaterialTheme.colorScheme.primaryContainer,
+                                        selectedLabelColor = if (isEmpty) Color.White else MaterialTheme.colorScheme.onPrimaryContainer
                                     )
                                 )
                             }
@@ -176,6 +239,8 @@ fun ProductCatalogScreen(viewModel: PosViewModel) {
 
             // Products List
             if (filteredProducts.isEmpty()) {
+                val isSelectedCatalogEmpty = selectedCategory != "Semua" && (productCounts[selectedCategory] ?: 0) == 0
+
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -184,18 +249,56 @@ fun ProductCatalogScreen(viewModel: PosViewModel) {
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(
-                            Icons.Default.Inventory,
+                            if (isSelectedCatalogEmpty) Icons.Default.FolderOpen else Icons.Default.Inventory,
                             contentDescription = null,
                             modifier = Modifier.size(64.dp),
-                            tint = Color.LightGray
+                            tint = if (isSelectedCatalogEmpty) Color(0xFFF57C00) else Color.LightGray
                         )
                         Spacer(modifier = Modifier.height(12.dp))
-                        Text(
-                            text = if (filterLowStockOnly) "Tidak ada produk dengan stok menipis!"
-                            else "Tidak ada produk yang cocok dengan pencarian",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+
+                        if (isSelectedCatalogEmpty) {
+                            Text(
+                                text = "Katalog '$selectedCategory' masih kosong!",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Tidak ada produk di dalam katalog ini. Anda dapat menambahkan produk atau menghapus katalog ini.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = TextAlign.Center
+                            )
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Button(
+                                    onClick = { showAddDialog = true },
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Tambah Produk", fontSize = 12.sp)
+                                }
+                                Button(
+                                    onClick = { emptyCatalogToDelete = selectedCategory },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F)),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.testTag("btn_delete_empty_catalog_screen")
+                                ) {
+                                    Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Hapus Katalog Kosong Ini", fontSize = 12.sp)
+                                }
+                            }
+                        } else {
+                            Text(
+                                text = if (filterLowStockOnly) "Tidak ada produk dengan stok menipis!"
+                                else "Tidak ada produk yang cocok dengan pencarian",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 }
             } else {
@@ -211,8 +314,9 @@ fun ProductCatalogScreen(viewModel: PosViewModel) {
                             onEdit = { productToEdit = product }
                         )
                     }
+
                     item {
-                        Spacer(modifier = Modifier.height(72.dp)) // Space for FAB
+                        Spacer(modifier = Modifier.height(80.dp))
                     }
                 }
             }
@@ -236,6 +340,7 @@ fun ProductCatalogScreen(viewModel: PosViewModel) {
     if (showAddDialog) {
         EditProductDialog(
             initialProduct = null,
+            availableCategories = allCatalogNames,
             onSave = { newProduct ->
                 viewModel.saveProduct(newProduct) {
                     showAddDialog = false
@@ -249,6 +354,7 @@ fun ProductCatalogScreen(viewModel: PosViewModel) {
     productToEdit?.let { prod ->
         EditProductDialog(
             initialProduct = prod,
+            availableCategories = allCatalogNames,
             onSave = { updatedProduct ->
                 viewModel.saveProduct(updatedProduct) {
                     productToEdit = null
@@ -259,6 +365,72 @@ fun ProductCatalogScreen(viewModel: PosViewModel) {
                 productToEdit = null
             },
             onDismiss = { productToEdit = null }
+        )
+    }
+
+    // Catalog Management Dialog
+    if (showCatalogManagerDialog) {
+        CatalogManagementDialog(
+            viewModel = viewModel,
+            onDismiss = { showCatalogManagerDialog = false }
+        )
+    }
+
+    // Quick Create Catalog Dialog
+    if (showQuickCreateCatalogDialog) {
+        QuickCreateCatalogDialog(
+            onConfirm = { newName ->
+                viewModel.createCatalog(newName) { success, _ ->
+                    if (success) {
+                        viewModel.selectCategory(newName)
+                        showQuickCreateCatalogDialog = false
+                    }
+                }
+            },
+            onDismiss = { showQuickCreateCatalogDialog = false }
+        )
+    }
+
+    // Delete empty catalog confirmation
+    emptyCatalogToDelete?.let { catName ->
+        AlertDialog(
+            onDismissRequest = { emptyCatalogToDelete = null },
+            icon = {
+                Icon(
+                    Icons.Default.Delete,
+                    contentDescription = null,
+                    tint = Color(0xFFD32F2F),
+                    modifier = Modifier.size(32.dp)
+                )
+            },
+            title = {
+                Text(
+                    text = "Hapus Katalog Kosong?",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                )
+            },
+            text = {
+                Text("Katalog '$catName' tidak memiliki produk di dalamnya dan akan dihapus.")
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val target = emptyCatalogToDelete
+                        emptyCatalogToDelete = null
+                        if (target != null) {
+                            viewModel.deleteCatalogByNameIfEmpty(target) { _, _ -> }
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F))
+                ) {
+                    Text("Ya, Hapus")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { emptyCatalogToDelete = null }) {
+                    Text("Batal")
+                }
+            }
         )
     }
 }
@@ -331,52 +503,85 @@ private fun ProductCard(
                     Icon(
                         Icons.Default.Edit,
                         contentDescription = "Edit Produk",
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(6.dp))
-
-            // Row 2: Name
-            Text(
-                text = product.name,
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-            )
-
-            // Row 3: Barcode number and mini visual
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    text = "QR/Barcode: ${product.barcode}",
-                    style = MaterialTheme.typography.bodySmall.copy(
-                        fontFamily = FontFamily.Monospace,
-                        color = Color.DarkGray
-                    )
-                )
-
-                // Stock status indicator
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = if (product.isLowStock) Color(0xFFFFCDD2) else Color(0xFFE8F5E9)
-                ) {
-                    Text(
-                        text = "Stok: ${product.stock} ${product.unit}",
-                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                        color = if (product.isLowStock) Color(0xFFB71C1C) else Color(0xFF1B5E20),
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(18.dp)
                     )
                 }
             }
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Row 4: Financial Prices (Beli, Jual, Laba)
-            Card(
+            // Row 2: Product Name & Stock count
+            Row(
                 modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = product.name,
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    modifier = Modifier.weight(1f)
+                )
+
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = if (product.isLowStock) Color(0xFFFFCDD2) else MaterialTheme.colorScheme.surfaceVariant
+                ) {
+                    Text(
+                        text = "Stok: ${product.stock} ${product.unit}",
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            fontWeight = FontWeight.Bold,
+                            color = if (product.isLowStock) Color(0xFFB71C1C) else MaterialTheme.colorScheme.onSurfaceVariant
+                        ),
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Row 3: Barcode snippet visual
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Default.QrCode,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                            tint = Color.Gray
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = product.barcode,
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontFamily = FontFamily.Monospace,
+                                color = Color.DarkGray
+                            )
+                        )
+                    }
+
+                    BarcodeVisual(
+                        barcode = product.barcode,
+                        modifier = Modifier.height(18.dp),
+                        showText = false
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Row 4: Buy price, Sell price & Profit margin
+            Card(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
                 shape = RoundedCornerShape(8.dp)
             ) {

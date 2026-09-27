@@ -98,8 +98,9 @@ fun PosScreen(
     var showScannerDialog by remember { mutableStateOf(false) }
     var selectedCategoryFilter by remember { mutableStateOf("Semua") }
 
-    val categories = remember(allProducts) {
-        listOf("Semua") + allProducts.map { it.category }.distinct()
+    val allCatalogNames by viewModel.allCatalogNames.collectAsStateWithLifecycle()
+    val categories = remember(allCatalogNames) {
+        listOf("Semua") + allCatalogNames
     }
 
     val displayProducts = remember(allProducts, selectedCategoryFilter) {

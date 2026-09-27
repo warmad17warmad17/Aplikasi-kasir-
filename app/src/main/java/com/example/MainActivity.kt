@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountBalanceWallet
+import androidx.compose.material.icons.filled.Backup
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Inventory
 import androidx.compose.material.icons.filled.PointOfSale
@@ -21,6 +22,7 @@ import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -45,6 +47,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.ui.PosViewModel
 import com.example.ui.components.ReceiptDialog
+import com.example.ui.dialogs.BackupRestoreDialog
 import com.example.ui.screens.ExpensesScreen
 import com.example.ui.screens.PosScreen
 import com.example.ui.screens.ProductCatalogScreen
@@ -73,6 +76,7 @@ class MainActivity : ComponentActivity() {
             MyApplicationTheme {
                 val snackbarHostState = remember { SnackbarHostState() }
                 var currentScreen by remember { mutableStateOf(Screen.POS) }
+                var showBackupDialog by remember { mutableStateOf(false) }
 
                 val storeInfo by viewModel.storeInfo.collectAsStateWithLifecycle()
                 val lowStockProducts by viewModel.lowStockProducts.collectAsStateWithLifecycle()
@@ -96,6 +100,18 @@ class MainActivity : ComponentActivity() {
                                         fontSize = 18.sp
                                     )
                                 )
+                            },
+                            actions = {
+                                IconButton(
+                                    onClick = { showBackupDialog = true },
+                                    modifier = Modifier.testTag("action_backup_restore_btn")
+                                ) {
+                                    Icon(
+                                        Icons.Default.Backup,
+                                        contentDescription = "Cadangkan & Pulihkan Data",
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                }
                             },
                             colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
                                 containerColor = MaterialTheme.colorScheme.surface,
@@ -175,6 +191,14 @@ class MainActivity : ComponentActivity() {
                                 transaction = receipt,
                                 storeInfo = storeInfo,
                                 onDismiss = { viewModel.dismissReceipt() }
+                            )
+                        }
+
+                        // Backup & Restore Dialog
+                        if (showBackupDialog) {
+                            BackupRestoreDialog(
+                                viewModel = viewModel,
+                                onDismiss = { showBackupDialog = false }
                             )
                         }
                     }

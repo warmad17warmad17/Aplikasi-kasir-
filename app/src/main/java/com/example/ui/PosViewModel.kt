@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.AppDatabase
+import com.example.data.entity.CatalogEntity
 import com.example.data.entity.ExpenseEntity
 import com.example.data.entity.ProductEntity
 import com.example.data.entity.StoreInfoEntity
@@ -18,6 +19,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -36,6 +38,28 @@ class PosViewModel(application: Application) : AndroidViewModel(application) {
 
     val lowStockProducts: StateFlow<List<ProductEntity>> = repository.lowStockProducts
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    // Catalogs
+    val allCatalogs: StateFlow<List<CatalogEntity>> = repository.allCatalogs
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    // Product counts per catalog (reactive)
+    val catalogProductCounts: StateFlow<Map<String, Int>> = combine(allProducts, allCatalogs) { products, catalogs ->
+        val counts = mutableMapOf<String, Int>()
+        catalogs.forEach { counts[it.name] = 0 }
+        products.forEach { p ->
+            val cat = p.category
+            counts[cat] = (counts[cat] ?: 0) + 1
+        }
+        counts
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
+
+    // Combined catalog names (including any custom category in products)
+    val allCatalogNames: StateFlow<List<String>> = combine(allCatalogs, allProducts) { catalogs, products ->
+        val fromDb = catalogs.map { it.name }
+        val fromProducts = products.map { it.category }.filter { it.isNotBlank() }
+        (fromDb + fromProducts).distinct().sorted()
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     // Product Filter / Search
     private val _searchQuery = MutableStateFlow("")
@@ -127,6 +151,38 @@ class PosViewModel(application: Application) : AndroidViewModel(application) {
         val totalExpenses = exps.sumOf { it.amount }
         info.initialCapital + totalSales - totalExpenses
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
+
+    // Inventory Valuation (Berdasarkan Harga Modal Produk)
+    val totalInventoryCostValue: StateFlow<Double> = allProducts.map { products ->
+        products.sumOf { (it.buyPrice * it.stock).coerceAtLeast(0.0) }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
+
+    val totalInventorySalesValue: StateFlow<Double> = allProducts.map { products ->
+        products.sumOf { (it.sellPrice * it.stock).coerceAtLeast(0.0) }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
+
+    val totalStockUnits: StateFlow<Int> = allProducts.map { products ->
+        products.sumOf { it.stock.coerceAtLeast(0) }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+
+    // Total Aset Usaha = Kas Toko + Nilai Modal Stok Produk
+    val totalBusinessAsset: StateFlow<Double> = combine(
+        totalCashBalance,
+        totalInventoryCostValue
+    ) { cash, inventoryCost ->
+        cash + inventoryCost
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
+
+    // Nilai Modal Stok per Kategori/Katalog
+    val inventoryCostByCategory: StateFlow<Map<String, Double>> = allProducts.map { products ->
+        val map = mutableMapOf<String, Double>()
+        products.forEach { p ->
+            val cat = p.category
+            val cost = (p.buyPrice * p.stock).coerceAtLeast(0.0)
+            map[cat] = (map[cat] ?: 0.0) + cost
+        }
+        map
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
 
     // ==========================================
     // CART & CASHIER ACTIONS
@@ -282,6 +338,74 @@ class PosViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // ==========================================
+    // CATALOG / CATEGORY MANAGEMENT
+    // ==========================================
+
+    fun createCatalog(name: String, onResult: (success: Boolean, message: String) -> Unit) {
+        val trimmed = name.trim()
+        if (trimmed.isBlank()) {
+            onResult(false, "Nama katalog tidak boleh kosong")
+            return
+        }
+        viewModelScope.launch {
+            val exists = allCatalogs.value.any { it.name.equals(trimmed, ignoreCase = true) }
+            if (exists) {
+                onResult(false, "Katalog '$trimmed' sudah ada!")
+                return@launch
+            }
+            val id = repository.saveCatalog(trimmed)
+            if (id > 0) {
+                onResult(true, "Katalog '$trimmed' berhasil ditambahkan!")
+            } else {
+                onResult(false, "Gagal menambahkan katalog")
+            }
+        }
+    }
+
+    fun deleteCatalogIfEmpty(catalog: CatalogEntity, onResult: (success: Boolean, message: String) -> Unit) {
+        viewModelScope.launch {
+            val count = repository.countProductsInCatalog(catalog.name)
+            if (count > 0) {
+                onResult(false, "Tidak dapat menghapus! Katalog '${catalog.name}' masih berisi $count produk.")
+            } else {
+                val deleted = repository.deleteCatalogIfEmpty(catalog)
+                if (deleted) {
+                    if (_selectedCategory.value.equals(catalog.name, ignoreCase = true)) {
+                        _selectedCategory.value = "Semua"
+                    }
+                    onResult(true, "Katalog '${catalog.name}' yang kosong berhasil dihapus.")
+                } else {
+                    onResult(false, "Gagal menghapus katalog.")
+                }
+            }
+        }
+    }
+
+    fun deleteCatalogByNameIfEmpty(catalogName: String, onResult: (success: Boolean, message: String) -> Unit) {
+        viewModelScope.launch {
+            val count = repository.countProductsInCatalog(catalogName)
+            if (count > 0) {
+                onResult(false, "Tidak dapat menghapus! Katalog '$catalogName' masih berisi $count produk.")
+            } else {
+                val catalog = allCatalogs.value.find { it.name.equals(catalogName, ignoreCase = true) }
+                if (catalog != null) {
+                    val deleted = repository.deleteCatalogIfEmpty(catalog)
+                    if (deleted) {
+                        if (_selectedCategory.value.equals(catalogName, ignoreCase = true)) {
+                            _selectedCategory.value = "Semua"
+                        }
+                        onResult(true, "Katalog '$catalogName' yang kosong berhasil dihapus.")
+                    } else {
+                        onResult(false, "Gagal menghapus katalog.")
+                    }
+                } else {
+                    onResult(false, "Katalog tidak ditemukan.")
+                }
+            }
+        }
+    }
+
+    // ==========================================
     // EXPENSE MANAGEMENT
     // ==========================================
 
@@ -335,5 +459,109 @@ class PosViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setReportPeriod(period: ReportPeriod) {
         _reportPeriod.value = period
+    }
+
+    // ==========================================
+    // BACKUP & RESTORE DATA
+    // ==========================================
+
+    fun exportBackupToUri(
+        uri: android.net.Uri,
+        context: android.content.Context,
+        onResult: (success: Boolean, message: String) -> Unit
+    ) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val backupData = repository.createBackupData()
+                context.contentResolver.openOutputStream(uri)?.use { os ->
+                    com.example.util.BackupManager.writeToOutputStream(backupData, os)
+                } ?: throw java.io.IOException("Gagal membuka ruang penyimpanan untuk menulis file cadangan")
+                onResult(true, "Cadangan data berhasil disimpan ke penyimpanan lokal!")
+            } catch (e: Exception) {
+                onResult(false, "Gagal mencadangkan data: ${e.localizedMessage ?: "Terjadi kesalahan"}")
+            }
+        }
+    }
+
+    fun shareBackupFile(
+        context: android.content.Context,
+        onResult: (success: Boolean, message: String) -> Unit
+    ) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val backupData = repository.createBackupData()
+                val file = com.example.util.BackupManager.createCacheBackupFile(context, backupData)
+                val uri = androidx.core.content.FileProvider.getUriForFile(
+                    context,
+                    "${context.packageName}.fileprovider",
+                    file
+                )
+
+                val shareIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                    type = "application/json"
+                    putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                    putExtra(
+                        android.content.Intent.EXTRA_SUBJECT,
+                        "Cadangan Data ${storeInfo.value.storeName} - ${com.example.util.Formatters.formatDateOnly(System.currentTimeMillis())}"
+                    )
+                    putExtra(
+                        android.content.Intent.EXTRA_TEXT,
+                        "File cadangan data aplikasi ${storeInfo.value.storeName}. Simpan atau kirim file ini ke HP baru untuk memulihkan seluruh data produk, transaksi, dan riwayat."
+                    )
+                    addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+
+                val chooser = android.content.Intent.createChooser(shareIntent, "Kirim / Bagikan File Cadangan").apply {
+                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(chooser)
+                onResult(true, "Menu kirim file cadangan siap digunakan")
+            } catch (e: Exception) {
+                onResult(false, "Gagal membagikan cadangan: ${e.localizedMessage ?: "Terjadi kesalahan"}")
+            }
+        }
+    }
+
+    fun inspectBackupFromUri(
+        uri: android.net.Uri,
+        context: android.content.Context,
+        onResult: (success: Boolean, summary: com.example.data.model.BackupSummary?, message: String) -> Unit
+    ) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val jsonString = context.contentResolver.openInputStream(uri)?.use { inputStream ->
+                    com.example.util.BackupManager.readFromInputStream(inputStream)
+                } ?: throw java.io.IOException("Tidak dapat membaca file cadangan")
+
+                val summary = com.example.util.BackupManager.peekBackupSummary(jsonString)
+                onResult(true, summary, "File cadangan valid")
+            } catch (e: Exception) {
+                onResult(false, null, "File tidak valid atau format rusak: ${e.localizedMessage ?: "Gagal membaca file"}")
+            }
+        }
+    }
+
+    fun restoreBackupFromUri(
+        uri: android.net.Uri,
+        context: android.content.Context,
+        onResult: (success: Boolean, message: String) -> Unit
+    ) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val jsonString = context.contentResolver.openInputStream(uri)?.use { inputStream ->
+                    com.example.util.BackupManager.readFromInputStream(inputStream)
+                } ?: throw java.io.IOException("Tidak dapat membaca file cadangan")
+
+                val backupData = com.example.util.BackupManager.parseBackupJson(jsonString)
+                repository.restoreBackupData(backupData)
+                _selectedCategory.value = "Semua"
+                onResult(
+                    true,
+                    "Data berhasil dipulihkan! ${backupData.products.size} produk, ${backupData.transactions.size} transaksi telah dimuat."
+                )
+            } catch (e: Exception) {
+                onResult(false, "Gagal memulihkan data: ${e.localizedMessage ?: "Terjadi kesalahan"}")
+            }
+        }
     }
 }

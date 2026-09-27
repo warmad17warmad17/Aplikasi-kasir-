@@ -1,5 +1,6 @@
 package com.example.data.repository
 
+import androidx.room.withTransaction
 import com.example.data.AppDatabase
 import com.example.data.entity.ExpenseEntity
 import com.example.data.entity.ProductEntity
@@ -24,6 +25,29 @@ class PosRepository(private val db: AppDatabase) {
     private val transactionDao = db.transactionDao()
     private val expenseDao = db.expenseDao()
     private val storeInfoDao = db.storeInfoDao()
+    private val catalogDao = db.catalogDao()
+
+    // Catalogs
+    val allCatalogs: Flow<List<com.example.data.entity.CatalogEntity>> = catalogDao.getAllCatalogs()
+
+    suspend fun saveCatalog(name: String): Long {
+        val trimmed = name.trim()
+        if (trimmed.isBlank()) return -1L
+        return catalogDao.insert(com.example.data.entity.CatalogEntity(name = trimmed))
+    }
+
+    suspend fun deleteCatalogIfEmpty(catalog: com.example.data.entity.CatalogEntity): Boolean {
+        val count = catalogDao.countProductsInCatalog(catalog.name)
+        if (count == 0) {
+            catalogDao.delete(catalog)
+            return true
+        }
+        return false
+    }
+
+    suspend fun countProductsInCatalog(catalogName: String): Int {
+        return catalogDao.countProductsInCatalog(catalogName)
+    }
 
     // Products
     val allProducts: Flow<List<ProductEntity>> = productDao.getAllProducts()
@@ -242,6 +266,67 @@ class PosRepository(private val db: AppDatabase) {
             }
             ReportPeriod.ALL_TIME -> {
                 Pair(0L, Long.MAX_VALUE)
+            }
+        }
+    }
+
+    // ==========================================
+    // BACKUP & RESTORE DATA
+    // ==========================================
+
+    suspend fun createBackupData(): com.example.data.model.BackupData {
+        val storeInfo = storeInfoDao.getStoreInfoSync() ?: StoreInfoEntity()
+        val catalogs = catalogDao.getAllCatalogsSync()
+        val products = productDao.getAllProductsSync()
+        val transactions = transactionDao.getAllTransactionsSync()
+        val transactionItems = transactionDao.getAllTransactionItemsSync()
+        val expenses = expenseDao.getAllExpensesSync()
+
+        return com.example.data.model.BackupData(
+            storeInfo = storeInfo,
+            catalogs = catalogs,
+            products = products,
+            transactions = transactions,
+            transactionItems = transactionItems,
+            expenses = expenses
+        )
+    }
+
+    suspend fun restoreBackupData(backupData: com.example.data.model.BackupData) {
+        db.withTransaction {
+            // 1. Clear existing database records
+            productDao.deleteAllProducts()
+            transactionDao.deleteAllTransactions()
+            transactionDao.deleteAllTransactionItems()
+            expenseDao.deleteAllExpenses()
+            catalogDao.deleteAllCatalogs()
+
+            // 2. Restore Store Info
+            storeInfoDao.insertOrUpdate(backupData.storeInfo)
+
+            // 3. Restore Catalogs
+            if (backupData.catalogs.isNotEmpty()) {
+                catalogDao.insertAll(backupData.catalogs)
+            }
+
+            // 4. Restore Products
+            if (backupData.products.isNotEmpty()) {
+                productDao.insertAll(backupData.products)
+            }
+
+            // 5. Restore Transactions
+            if (backupData.transactions.isNotEmpty()) {
+                transactionDao.insertTransactions(backupData.transactions)
+            }
+
+            // 6. Restore Transaction Items
+            if (backupData.transactionItems.isNotEmpty()) {
+                transactionDao.insertItems(backupData.transactionItems)
+            }
+
+            // 7. Restore Expenses
+            if (backupData.expenses.isNotEmpty()) {
+                expenseDao.insertAll(backupData.expenses)
             }
         }
     }

@@ -41,6 +41,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.data.entity.ProductEntity
@@ -51,6 +52,7 @@ import kotlin.random.Random
 @Composable
 fun EditProductDialog(
     initialProduct: ProductEntity? = null,
+    availableCategories: List<String> = emptyList(),
     onSave: (ProductEntity) -> Unit,
     onDelete: ((ProductEntity) -> Unit)? = null,
     onDismiss: () -> Unit
@@ -59,7 +61,9 @@ fun EditProductDialog(
     var barcode by remember {
         mutableStateOf(initialProduct?.barcode ?: generateRandomBarcode())
     }
-    var category by remember { mutableStateOf(initialProduct?.category ?: "Sembako") }
+    var category by remember {
+        mutableStateOf(initialProduct?.category ?: if (availableCategories.isNotEmpty()) availableCategories.first() else "Sembako")
+    }
     var unit by remember { mutableStateOf(initialProduct?.unit ?: "Pcs") }
     var buyPriceText by remember {
         mutableStateOf(initialProduct?.buyPrice?.toLong()?.toString() ?: "")
@@ -193,6 +197,28 @@ fun EditProductDialog(
                             placeholder = { Text("Pcs/Bks") },
                             singleLine = true
                         )
+                    }
+
+                    if (availableCategories.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        androidx.compose.foundation.lazy.LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            items(availableCategories.size) { index ->
+                                val catName = availableCategories[index]
+                                val isSelected = category.equals(catName, ignoreCase = true)
+                                androidx.compose.material3.FilterChip(
+                                    selected = isSelected,
+                                    onClick = { category = catName },
+                                    label = { Text(catName, fontSize = 11.sp) },
+                                    colors = androidx.compose.material3.FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                                        selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                )
+                            }
+                        }
                     }
 
                     // Stock & Low Stock Alert
